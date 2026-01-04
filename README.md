@@ -34,6 +34,18 @@ ou compartilhamentos de vídeo.
 - Windows 10 / 11
 - Python 3.10+
 
+## ⚠️ Aviso legal
+
+Este projeto utiliza APIs de terceiros (por exemplo, OpenAI),
+que podem gerar custos financeiros.
+
+O autor **não se responsabiliza** por:
+- custos de uso da API
+- chaves de API expostas
+- uso indevido do software
+
+Você é totalmente responsável por suas próprias chaves e gastos.
+
 ## 🚀 Instalação
 
 ```bash
