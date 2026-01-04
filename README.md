@@ -45,6 +45,7 @@ O autor **não se responsabiliza** por:
 - uso indevido do software
 
 Você é totalmente responsável por suas próprias chaves e gastos.
+O autor não se responsabiliza por custos ou uso indevido.
 
 ## 🚀 Instalação
 
@@ -55,3 +56,20 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 pythonw main.py
+
+
+## 🚀 Execução
+
+Após instalar as dependências, você pode executar o Joblock de duas formas:
+
+### ▶️ Execução normal (com terminal)
+
+```bash
+python main.py
+
+### ▶️ Execução em background (sem janela de terminal) (recomendado)
+
+```bash
+pythonw main.py
+
+
