@@ -19,11 +19,11 @@ from openai import OpenAI
 
 client = OpenAI()
 
-def ask_llm(prompt: str, image_bytes: bytes) -> str:
+def ask_llm(prompt: str, image_bytes: bytes, model: str = "gpt-4.1-mini") -> str:
     b64 = base64.b64encode(image_bytes).decode("utf-8")
 
     resp = client.responses.create(
-        model="gpt-4.1-mini",
+        model=model,
         input=[
             {
                 "role": "user",

@@ -67,6 +67,7 @@ MAX_AUDIO_SECONDS_HARD = 15 * 60
 
 TRANSCRIBE_MODEL = "whisper-1"
 TEXT_MODEL = "gpt-4o-mini"
+VISION_MODEL = "gpt-4.1-mini"
 
 AUDIO_RATE = 16000
 AUDIO_CHANNELS = 1
@@ -171,6 +172,7 @@ def shortcuts_text() -> str:
         "F10  - Limpar memória/histórico\n"
         "F1   - Mostrar esta tela de atalhos\n"
         "F12  - Editar prompts (Screenshot/Áudio/System)\n"
+        "F11  - Configurações do sistema (modelos)\n"
         "ESC  - Esconder janelas (não fecha)\n"
         "CTRL+SHIFT+Q - Sair\n"
     )
@@ -416,6 +418,126 @@ class PromptOverlay(QtWidgets.QWidget):
 
 
 # =========================
+# UI: SettingsOverlay (modelos)
+# =========================
+class SettingsOverlay(QtWidgets.QWidget):
+    saved = QtCore.Signal(dict)  # {"vision":..., "text":..., "transcribe":...}
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(
+            QtCore.Qt.FramelessWindowHint |
+            QtCore.Qt.WindowStaysOnTopHint |
+            QtCore.Qt.Tool
+        )
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+
+        self.box = QtWidgets.QWidget()
+        self.box.setStyleSheet("""
+            QWidget {
+                background: rgba(0,0,0,170);
+                color: white;
+                border-radius: 12px;
+            }
+            QLabel { color: white; font-size: 13px; }
+            QComboBox {
+                background: rgba(20,20,20,220);
+                color: white;
+                border-radius: 8px;
+                padding: 6px;
+                font-size: 13px;
+            }
+            QPushButton {
+                background: rgba(40,40,40,220);
+                color: white;
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-size: 13px;
+            }
+            QPushButton:hover { background: rgba(60,60,60,220); }
+        """)
+
+        self.vision_combo = QtWidgets.QComboBox()
+        self.text_combo = QtWidgets.QComboBox()
+        self.transcribe_combo = QtWidgets.QComboBox()
+
+        lbl1 = QtWidgets.QLabel("Modelo para Screenshot (visão):")
+        lbl2 = QtWidgets.QLabel("Modelo para Texto/Chat:")
+        lbl3 = QtWidgets.QLabel("Modelo para Transcrição de Áudio:")
+
+        self.btn_save = QtWidgets.QPushButton("Salvar")
+        self.btn_cancel = QtWidgets.QPushButton("Cancelar")
+
+        self.btn_save.clicked.connect(self._save)
+        self.btn_cancel.clicked.connect(self.hide)
+
+        form = QtWidgets.QVBoxLayout(self.box)
+        form.setContentsMargins(16, 16, 16, 16)
+        form.setSpacing(10)
+        form.addWidget(lbl1)
+        form.addWidget(self.vision_combo)
+        form.addWidget(lbl2)
+        form.addWidget(self.text_combo)
+        form.addWidget(lbl3)
+        form.addWidget(self.transcribe_combo)
+
+        row = QtWidgets.QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(self.btn_cancel)
+        row.addWidget(self.btn_save)
+        form.addLayout(row)
+
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(16, 16, 16, 16)
+        outer.addWidget(self.box)
+
+        self.resize(640, 380)
+        self.hide()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        exclude_from_capture(int(self.winId()))
+
+    def _set_combo_value(self, combo: QtWidgets.QComboBox, value: str):
+        idx = combo.findText(value)
+        if idx < 0 and value:
+            combo.addItem(value)
+            idx = combo.findText(value)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+
+    def set_models(self, models: list[str], vision: str, text: str, transcribe: str):
+        self.vision_combo.clear()
+        self.text_combo.clear()
+        self.transcribe_combo.clear()
+        for model in models:
+            self.vision_combo.addItem(model)
+            self.text_combo.addItem(model)
+            self.transcribe_combo.addItem(model)
+        self._set_combo_value(self.vision_combo, vision)
+        self._set_combo_value(self.text_combo, text)
+        self._set_combo_value(self.transcribe_combo, transcribe)
+
+    def _save(self):
+        payload = {
+            "vision": self.vision_combo.currentText().strip(),
+            "text": self.text_combo.currentText().strip(),
+            "transcribe": self.transcribe_combo.currentText().strip(),
+        }
+        self.saved.emit(payload)
+        self.hide()
+
+    def move_center(self):
+        screen = QtGui.QGuiApplication.primaryScreen()
+        if not screen:
+            return
+        geo = screen.availableGeometry()
+        x = geo.x() + (geo.width() - self.width()) // 2
+        y = geo.y() + (geo.height() - self.height()) // 2
+        self.move(x, y)
+
+
+# =========================
 # Audio Recorder
 # =========================
 class AudioRecorder:
@@ -525,7 +647,7 @@ class ScreenshotWorker(QtCore.QObject):
             png = capture_screen()
 
             self.status.emit("Consultando LLM (imagem)...")
-            answer = ask_llm(self.prompt, png)
+            answer = ask_llm(self.prompt, png, VISION_MODEL)
 
             self.status.emit("Transcrevendo imagem para histórico...")
             img_transcription = describe_image_textually_from_answer(answer)
@@ -592,6 +714,16 @@ class HotkeyBridge(QtCore.QObject):
     send_input = QtCore.Signal()
     show_help = QtCore.Signal()
     edit_prompts = QtCore.Signal()
+    edit_settings = QtCore.Signal()
+
+
+def list_openai_models() -> list[str]:
+    try:
+        models = client.models.list()
+        names = sorted({m.id for m in models.data if getattr(m, "id", None)})
+        return names
+    except Exception:
+        return []
 
 
 # =========================
@@ -660,6 +792,7 @@ def main():
     overlay = Overlay()
     help_overlay = HelpOverlay()
     prompt_overlay = PromptOverlay()
+    settings_overlay = SettingsOverlay()
     bridge = HotkeyBridge()
 
     # Mostra HELP ao iniciar (overlay invisível à captura)
@@ -802,12 +935,14 @@ def main():
         overlay.hide()
         help_overlay.hide()
         prompt_overlay.hide()
+        settings_overlay.hide()
 
     @QtCore.Slot()
     def quit_app():
         overlay.hide()
         help_overlay.hide()
         prompt_overlay.hide()
+        settings_overlay.hide()
         if recorder is not None:
             try:
                 recorder.close()
@@ -838,6 +973,21 @@ def main():
         prompt_overlay.raise_()
         prompt_overlay.activateWindow()
 
+    def show_settings_overlay():
+        available = list_openai_models()
+        if not available:
+            available = [VISION_MODEL, TEXT_MODEL, TRANSCRIBE_MODEL]
+        else:
+            for model in (VISION_MODEL, TEXT_MODEL, TRANSCRIBE_MODEL):
+                if model not in available:
+                    available.append(model)
+        available = sorted(dict.fromkeys(available))
+        settings_overlay.set_models(available, VISION_MODEL, TEXT_MODEL, TRANSCRIBE_MODEL)
+        settings_overlay.move_center()
+        settings_overlay.show()
+        settings_overlay.raise_()
+        settings_overlay.activateWindow()
+
     def on_prompts_saved(payload: dict):
         global SYSTEM_PROMPT_TEXT
         # Atualiza os 3 prompts
@@ -856,6 +1006,25 @@ def main():
 
     prompt_overlay.saved.connect(on_prompts_saved)
 
+    def on_settings_saved(payload: dict):
+        global VISION_MODEL, TEXT_MODEL, TRANSCRIBE_MODEL
+        vision = payload.get("vision", "").strip()
+        text = payload.get("text", "").strip()
+        transcribe = payload.get("transcribe", "").strip()
+        if vision:
+            VISION_MODEL = vision
+        if text:
+            TEXT_MODEL = text
+        if transcribe:
+            TRANSCRIBE_MODEL = transcribe
+
+        overlay.move_to_bottom_right()
+        overlay.set_text("✅ Modelos atualizados (Screenshot/Texto/Áudio).")
+        overlay.show()
+        overlay.raise_()
+
+    settings_overlay.saved.connect(on_settings_saved)
+
     # Overlay enter -> pergunta manual
     overlay.ask.connect(do_text_question)
 
@@ -869,6 +1038,7 @@ def main():
     bridge.send_input.connect(overlay.send_input)
     bridge.show_help.connect(show_help_overlay)
     bridge.edit_prompts.connect(show_prompt_overlay)
+    bridge.edit_settings.connect(show_settings_overlay)
 
     # Hotkeys
     keyboard.add_hotkey("F9", lambda: bridge.screenshot.emit())
@@ -878,6 +1048,7 @@ def main():
     keyboard.add_hotkey("F6", lambda: bridge.send_input.emit())
     keyboard.add_hotkey("F1", lambda: bridge.show_help.emit())
     keyboard.add_hotkey("F12", lambda: bridge.edit_prompts.emit())
+    keyboard.add_hotkey("F11", lambda: bridge.edit_settings.emit())
     keyboard.add_hotkey("esc", lambda: bridge.hide.emit())
     keyboard.add_hotkey("ctrl+shift+q", lambda: bridge.quit.emit())
 
