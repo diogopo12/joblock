@@ -9,3 +9,14 @@ models:
   vision: gpt-4.1-mini
   text: gpt-4.1-mini
   transcribe: whisper-1
+shortcuts:
+  screenshot: F9
+  audio_toggle: F8
+  focus_input: F7
+  send_input: F6
+  clear_memory: F10
+  show_help: F1
+  edit_prompts: F12
+  edit_settings: F11
+  hide: esc
+  quit: ctrl+shift+q

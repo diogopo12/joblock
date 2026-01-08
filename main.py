@@ -86,6 +86,34 @@ prompts = {
     "audio": "Com base no áudio capturado, responda em português com um resumo e próximos passos. Liste tarefas em bullets.",
 }
 
+DEFAULT_SHORTCUTS = {
+    "screenshot": "F9",
+    "audio_toggle": "F8",
+    "focus_input": "F7",
+    "send_input": "F6",
+    "clear_memory": "F10",
+    "show_help": "F1",
+    "edit_prompts": "F12",
+    "edit_settings": "F11",
+    "hide": "esc",
+    "quit": "ctrl+shift+q",
+}
+
+SHORTCUT_LABELS = {
+    "screenshot": "Screenshot (analisar imagem)",
+    "audio_toggle": "Gravar/Parar áudio (enviar para LLM)",
+    "focus_input": "Focar na caixa de pergunta",
+    "send_input": "Enviar a pergunta digitada",
+    "clear_memory": "Limpar memória/histórico",
+    "show_help": "Mostrar esta tela de atalhos (fixo)",
+    "edit_prompts": "Editar prompts (Screenshot/Áudio/System)",
+    "edit_settings": "Configurações do sistema (modelos)",
+    "hide": "Esconder janelas (não fecha) (fixo)",
+    "quit": "Sair",
+}
+
+SHORTCUT_FIXED_KEYS = {"show_help", "hide"}
+
 CONFIG_PATH = Path(__file__).resolve().parent / "config.yaml"
 
 
@@ -101,6 +129,7 @@ def _default_config() -> dict:
             "text": TEXT_MODEL,
             "transcribe": TRANSCRIBE_MODEL,
         },
+        "shortcuts": dict(DEFAULT_SHORTCUTS),
     }
 
 
@@ -123,6 +152,12 @@ def load_config() -> dict:
             base["models"]["vision"] = models_data.get("vision", base["models"]["vision"])
             base["models"]["text"] = models_data.get("text", base["models"]["text"])
             base["models"]["transcribe"] = models_data.get("transcribe", base["models"]["transcribe"])
+        shortcuts_data = data.get("shortcuts", {})
+        if isinstance(shortcuts_data, dict):
+            for key, default_value in base["shortcuts"].items():
+                value = shortcuts_data.get(key, default_value)
+                if value:
+                    base["shortcuts"][key] = value
     return base
 
 
@@ -138,6 +173,27 @@ prompts["audio"] = config["prompts"]["audio"]
 VISION_MODEL = config["models"]["vision"]
 TEXT_MODEL = config["models"]["text"]
 TRANSCRIBE_MODEL = config["models"]["transcribe"]
+shortcuts = config["shortcuts"]
+for key in SHORTCUT_FIXED_KEYS:
+    shortcuts[key] = DEFAULT_SHORTCUTS[key]
+
+
+def persist_config() -> None:
+    save_config(
+        {
+            "system_prompt": SYSTEM_PROMPT_TEXT,
+            "prompts": {
+                "screenshot": prompts["screenshot"],
+                "audio": prompts["audio"],
+            },
+            "models": {
+                "vision": VISION_MODEL,
+                "text": TEXT_MODEL,
+                "transcribe": TRANSCRIBE_MODEL,
+            },
+            "shortcuts": shortcuts,
+        }
+    )
 
 # =========================
 # Windows: exclude from capture
@@ -217,19 +273,23 @@ def describe_image_textually_from_answer(image_answer: str) -> str:
 # Texto de atalhos
 # =========================
 def shortcuts_text() -> str:
+    def format_line(key: str, label: str) -> str:
+        return f"{key:<12} - {label}\n"
+
     return (
         "JOBLOCK — ATALHOS\n"
         "----------------\n"
-        "F9   - Screenshot (analisar imagem)\n"
-        "F8   - Gravar/Parar áudio (enviar para LLM)\n"
-        "F7   - Focar na caixa de pergunta\n"
-        "F6   - Enviar a pergunta digitada\n"
-        "F10  - Limpar memória/histórico\n"
-        "F1   - Mostrar esta tela de atalhos\n"
-        "F12  - Editar prompts (Screenshot/Áudio/System)\n"
-        "F11  - Configurações do sistema (modelos)\n"
-        "ESC  - Esconder janelas (não fecha)\n"
-        "CTRL+SHIFT+Q - Sair\n"
+        f"{format_line(shortcuts['screenshot'], SHORTCUT_LABELS['screenshot'])}"
+        f"{format_line(shortcuts['audio_toggle'], SHORTCUT_LABELS['audio_toggle'])}"
+        f"{format_line(shortcuts['focus_input'], SHORTCUT_LABELS['focus_input'])}"
+        f"{format_line(shortcuts['send_input'], SHORTCUT_LABELS['send_input'])}"
+        f"{format_line(shortcuts['clear_memory'], SHORTCUT_LABELS['clear_memory'])}"
+        f"{format_line(shortcuts['show_help'], SHORTCUT_LABELS['show_help'])}"
+        f"{format_line(shortcuts['edit_prompts'], SHORTCUT_LABELS['edit_prompts'])}"
+        f"{format_line(shortcuts['edit_settings'], SHORTCUT_LABELS['edit_settings'])}"
+        f"{format_line(shortcuts['hide'], SHORTCUT_LABELS['hide'])}"
+        f"{format_line(shortcuts['quit'], SHORTCUT_LABELS['quit'])}"
+        "Botão (F1) - Configurar atalhos (F1 e ESC são fixos)\n"
     )
 
 
@@ -323,6 +383,8 @@ class Overlay(QtWidgets.QWidget):
 # UI: HelpOverlay (igual ao overlay)
 # =========================
 class HelpOverlay(QtWidgets.QWidget):
+    configure_shortcuts = QtCore.Signal()
+
     def __init__(self):
         super().__init__()
         self.setWindowFlags(
@@ -332,22 +394,49 @@ class HelpOverlay(QtWidgets.QWidget):
         )
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
 
-        self.text = QtWidgets.QTextEdit(readOnly=True)
-        self.text.setStyleSheet("""
-            QTextEdit {
+        self.box = QtWidgets.QWidget()
+        self.box.setStyleSheet("""
+            QWidget {
                 background: rgba(0,0,0,170);
                 color: white;
                 border-radius: 12px;
+            }
+            QTextEdit {
+                background: transparent;
+                color: white;
+                border-radius: 0px;
                 padding: 12px;
                 font-size: 14px;
             }
+            QPushButton {
+                background: rgba(40,40,40,220);
+                color: white;
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-size: 13px;
+            }
+            QPushButton:hover { background: rgba(60,60,60,220); }
         """)
 
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.addWidget(self.text)
+        self.text = QtWidgets.QTextEdit(readOnly=True)
+        self.btn_shortcuts = QtWidgets.QPushButton("Configurar atalhos")
+        self.btn_shortcuts.clicked.connect(self.configure_shortcuts.emit)
 
-        self.resize(560, 340)
+        form = QtWidgets.QVBoxLayout(self.box)
+        form.setContentsMargins(16, 16, 16, 16)
+        form.setSpacing(10)
+        form.addWidget(self.text)
+
+        row = QtWidgets.QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(self.btn_shortcuts)
+        form.addLayout(row)
+
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(16, 16, 16, 16)
+        outer.addWidget(self.box)
+
+        self.resize(600, 380)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -579,6 +668,132 @@ class SettingsOverlay(QtWidgets.QWidget):
             "text": self.text_combo.currentText().strip(),
             "transcribe": self.transcribe_combo.currentText().strip(),
         }
+        self.saved.emit(payload)
+        self.hide()
+
+    def move_center(self):
+        screen = QtGui.QGuiApplication.primaryScreen()
+        if not screen:
+            return
+        geo = screen.availableGeometry()
+        x = geo.x() + (geo.width() - self.width()) // 2
+        y = geo.y() + (geo.height() - self.height()) // 2
+        self.move(x, y)
+
+
+# =========================
+# UI: ShortcutOverlay (atalhos)
+# =========================
+class ShortcutOverlay(QtWidgets.QWidget):
+    saved = QtCore.Signal(dict)  # {"screenshot":..., "audio_toggle":..., ...}
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(
+            QtCore.Qt.FramelessWindowHint |
+            QtCore.Qt.WindowStaysOnTopHint |
+            QtCore.Qt.Tool
+        )
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+
+        self.box = QtWidgets.QWidget()
+        self.box.setStyleSheet("""
+            QWidget {
+                background: rgba(0,0,0,170);
+                color: white;
+                border-radius: 12px;
+            }
+            QLabel { color: white; font-size: 13px; }
+            QLineEdit {
+                background: rgba(20,20,20,220);
+                color: white;
+                border-radius: 8px;
+                padding: 6px;
+                font-size: 13px;
+            }
+            QPushButton {
+                background: rgba(40,40,40,220);
+                color: white;
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-size: 13px;
+            }
+            QPushButton:hover { background: rgba(60,60,60,220); }
+        """)
+
+        self.fields = {}
+
+        form = QtWidgets.QFormLayout()
+        form.setContentsMargins(16, 16, 16, 16)
+        form.setSpacing(10)
+
+        for key, label in SHORTCUT_LABELS.items():
+            line = QtWidgets.QLineEdit()
+            if key in SHORTCUT_FIXED_KEYS:
+                line.setReadOnly(True)
+                line.setStyleSheet("color: rgba(200,200,200,180);")
+            self.fields[key] = line
+            form.addRow(QtWidgets.QLabel(label + ":"), line)
+
+        note = QtWidgets.QLabel("F1 e ESC são fixos e não podem ser alterados.")
+        note.setStyleSheet("color: rgba(200,200,200,180); font-size: 12px;")
+
+        self.btn_save = QtWidgets.QPushButton("Salvar")
+        self.btn_cancel = QtWidgets.QPushButton("Cancelar")
+        self.btn_save.clicked.connect(self._save)
+        self.btn_cancel.clicked.connect(self.hide)
+
+        form.addRow(note)
+
+        row = QtWidgets.QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(self.btn_cancel)
+        row.addWidget(self.btn_save)
+
+        wrapper = QtWidgets.QVBoxLayout(self.box)
+        wrapper.setContentsMargins(16, 16, 16, 16)
+        wrapper.addLayout(form)
+        wrapper.addLayout(row)
+
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(16, 16, 16, 16)
+        outer.addWidget(self.box)
+
+        self.resize(640, 520)
+        self.hide()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        exclude_from_capture(int(self.winId()))
+
+    def set_shortcuts(self, values: dict):
+        for key, field in self.fields.items():
+            field.setText(values.get(key, ""))
+
+    def _save(self):
+        payload = {}
+        reserved = {shortcuts["show_help"].lower(), shortcuts["hide"].lower()}
+        for key, field in self.fields.items():
+            value = field.text().strip()
+            if key in SHORTCUT_FIXED_KEYS:
+                payload[key] = shortcuts[key]
+                continue
+            if not value:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Atalhos",
+                    f"O atalho '{SHORTCUT_LABELS[key]}' não pode ficar vazio.",
+                )
+                return
+            if value.lower() in reserved:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Atalhos",
+                    f"O atalho '{SHORTCUT_LABELS[key]}' não pode usar {value} (reservado).",
+                )
+                return
+            payload[key] = value
+
         self.saved.emit(payload)
         self.hide()
 
@@ -848,6 +1063,7 @@ def main():
     help_overlay = HelpOverlay()
     prompt_overlay = PromptOverlay()
     settings_overlay = SettingsOverlay()
+    shortcut_overlay = ShortcutOverlay()
     bridge = HotkeyBridge()
 
     # Mostra HELP ao iniciar (overlay invisível à captura)
@@ -991,6 +1207,7 @@ def main():
         help_overlay.hide()
         prompt_overlay.hide()
         settings_overlay.hide()
+        shortcut_overlay.hide()
 
     @QtCore.Slot()
     def quit_app():
@@ -998,6 +1215,7 @@ def main():
         help_overlay.hide()
         prompt_overlay.hide()
         settings_overlay.hide()
+        shortcut_overlay.hide()
         if recorder is not None:
             try:
                 recorder.close()
@@ -1043,6 +1261,13 @@ def main():
         settings_overlay.raise_()
         settings_overlay.activateWindow()
 
+    def show_shortcut_overlay():
+        shortcut_overlay.set_shortcuts(shortcuts)
+        shortcut_overlay.move_center()
+        shortcut_overlay.show()
+        shortcut_overlay.raise_()
+        shortcut_overlay.activateWindow()
+
     def on_prompts_saved(payload: dict):
         global SYSTEM_PROMPT_TEXT
         # Atualiza os 3 prompts
@@ -1054,20 +1279,7 @@ def main():
         if sp:
             globals()["SYSTEM_PROMPT_TEXT"] = sp
 
-        save_config(
-            {
-                "system_prompt": SYSTEM_PROMPT_TEXT,
-                "prompts": {
-                    "screenshot": prompts["screenshot"],
-                    "audio": prompts["audio"],
-                },
-                "models": {
-                    "vision": VISION_MODEL,
-                    "text": TEXT_MODEL,
-                    "transcribe": TRANSCRIBE_MODEL,
-                },
-            }
-        )
+        persist_config()
 
         overlay.move_to_bottom_right()
         overlay.set_text("✅ Prompts atualizados (Screenshot/Áudio/System).")
@@ -1088,20 +1300,7 @@ def main():
         if transcribe:
             TRANSCRIBE_MODEL = transcribe
 
-        save_config(
-            {
-                "system_prompt": SYSTEM_PROMPT_TEXT,
-                "prompts": {
-                    "screenshot": prompts["screenshot"],
-                    "audio": prompts["audio"],
-                },
-                "models": {
-                    "vision": VISION_MODEL,
-                    "text": TEXT_MODEL,
-                    "transcribe": TRANSCRIBE_MODEL,
-                },
-            }
-        )
+        persist_config()
 
         overlay.move_to_bottom_right()
         overlay.set_text("✅ Modelos atualizados (Screenshot/Texto/Áudio).")
@@ -1109,6 +1308,33 @@ def main():
         overlay.raise_()
 
     settings_overlay.saved.connect(on_settings_saved)
+
+    def register_hotkeys():
+        keyboard.clear_all_hotkeys()
+        keyboard.add_hotkey(shortcuts["screenshot"], lambda: bridge.screenshot.emit())
+        keyboard.add_hotkey(shortcuts["audio_toggle"], lambda: bridge.audio_toggle.emit())
+        keyboard.add_hotkey(shortcuts["clear_memory"], lambda: bridge.clear_memory.emit())
+        keyboard.add_hotkey(shortcuts["focus_input"], lambda: bridge.focus_input.emit())
+        keyboard.add_hotkey(shortcuts["send_input"], lambda: bridge.send_input.emit())
+        keyboard.add_hotkey(shortcuts["show_help"], lambda: bridge.show_help.emit())
+        keyboard.add_hotkey(shortcuts["edit_prompts"], lambda: bridge.edit_prompts.emit())
+        keyboard.add_hotkey(shortcuts["edit_settings"], lambda: bridge.edit_settings.emit())
+        keyboard.add_hotkey(shortcuts["hide"], lambda: bridge.hide.emit())
+        keyboard.add_hotkey(shortcuts["quit"], lambda: bridge.quit.emit())
+
+    def on_shortcuts_saved(payload: dict):
+        for key, value in payload.items():
+            shortcuts[key] = value
+        persist_config()
+        register_hotkeys()
+
+        overlay.move_to_bottom_right()
+        overlay.set_text("✅ Atalhos atualizados.")
+        overlay.show()
+        overlay.raise_()
+
+    shortcut_overlay.saved.connect(on_shortcuts_saved)
+    help_overlay.configure_shortcuts.connect(show_shortcut_overlay)
 
     # Overlay enter -> pergunta manual
     overlay.ask.connect(do_text_question)
@@ -1126,16 +1352,7 @@ def main():
     bridge.edit_settings.connect(show_settings_overlay)
 
     # Hotkeys
-    keyboard.add_hotkey("F9", lambda: bridge.screenshot.emit())
-    keyboard.add_hotkey("F8", lambda: bridge.audio_toggle.emit())
-    keyboard.add_hotkey("F10", lambda: bridge.clear_memory.emit())
-    keyboard.add_hotkey("F7", lambda: bridge.focus_input.emit())
-    keyboard.add_hotkey("F6", lambda: bridge.send_input.emit())
-    keyboard.add_hotkey("F1", lambda: bridge.show_help.emit())
-    keyboard.add_hotkey("F12", lambda: bridge.edit_prompts.emit())
-    keyboard.add_hotkey("F11", lambda: bridge.edit_settings.emit())
-    keyboard.add_hotkey("esc", lambda: bridge.hide.emit())
-    keyboard.add_hotkey("ctrl+shift+q", lambda: bridge.quit.emit())
+    register_hotkeys()
 
     sys.exit(app.exec())
 
