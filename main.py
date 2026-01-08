@@ -86,7 +86,7 @@ prompts = {
     "audio": "Com base no áudio capturado, responda em português com um resumo e próximos passos. Liste tarefas em bullets.",
 }
 
-CONFIG_PATH = Path.home() / ".joblock" / "config.yaml"
+CONFIG_PATH = Path(__file__).resolve().parent / "config.yaml"
 
 
 def _default_config() -> dict:
