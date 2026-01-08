@@ -1221,10 +1221,7 @@ def main():
                 recorder.close()
             except Exception:
                 pass
-        try:
-            keyboard.clear_all_hotkeys()
-        except Exception:
-            pass
+        clear_registered_hotkeys()
         QtCore.QCoreApplication.quit()
 
     @QtCore.Slot()
@@ -1309,18 +1306,50 @@ def main():
 
     settings_overlay.saved.connect(on_settings_saved)
 
+    hotkey_handles = []
+
+    def clear_registered_hotkeys():
+        for handle in hotkey_handles:
+            if handle is None:
+                continue
+            try:
+                keyboard.remove_hotkey(handle)
+            except Exception:
+                pass
+        hotkey_handles.clear()
+
     def register_hotkeys():
-        keyboard.clear_all_hotkeys()
-        keyboard.add_hotkey(shortcuts["screenshot"], lambda: bridge.screenshot.emit())
-        keyboard.add_hotkey(shortcuts["audio_toggle"], lambda: bridge.audio_toggle.emit())
-        keyboard.add_hotkey(shortcuts["clear_memory"], lambda: bridge.clear_memory.emit())
-        keyboard.add_hotkey(shortcuts["focus_input"], lambda: bridge.focus_input.emit())
-        keyboard.add_hotkey(shortcuts["send_input"], lambda: bridge.send_input.emit())
-        keyboard.add_hotkey(shortcuts["show_help"], lambda: bridge.show_help.emit())
-        keyboard.add_hotkey(shortcuts["edit_prompts"], lambda: bridge.edit_prompts.emit())
-        keyboard.add_hotkey(shortcuts["edit_settings"], lambda: bridge.edit_settings.emit())
-        keyboard.add_hotkey(shortcuts["hide"], lambda: bridge.hide.emit())
-        keyboard.add_hotkey(shortcuts["quit"], lambda: bridge.quit.emit())
+        clear_registered_hotkeys()
+        hotkey_handles.append(
+            keyboard.add_hotkey(shortcuts["screenshot"], lambda: bridge.screenshot.emit())
+        )
+        hotkey_handles.append(
+            keyboard.add_hotkey(shortcuts["audio_toggle"], lambda: bridge.audio_toggle.emit())
+        )
+        hotkey_handles.append(
+            keyboard.add_hotkey(shortcuts["clear_memory"], lambda: bridge.clear_memory.emit())
+        )
+        hotkey_handles.append(
+            keyboard.add_hotkey(shortcuts["focus_input"], lambda: bridge.focus_input.emit())
+        )
+        hotkey_handles.append(
+            keyboard.add_hotkey(shortcuts["send_input"], lambda: bridge.send_input.emit())
+        )
+        hotkey_handles.append(
+            keyboard.add_hotkey(shortcuts["show_help"], lambda: bridge.show_help.emit())
+        )
+        hotkey_handles.append(
+            keyboard.add_hotkey(shortcuts["edit_prompts"], lambda: bridge.edit_prompts.emit())
+        )
+        hotkey_handles.append(
+            keyboard.add_hotkey(shortcuts["edit_settings"], lambda: bridge.edit_settings.emit())
+        )
+        hotkey_handles.append(
+            keyboard.add_hotkey(shortcuts["hide"], lambda: bridge.hide.emit())
+        )
+        hotkey_handles.append(
+            keyboard.add_hotkey(shortcuts["quit"], lambda: bridge.quit.emit())
+        )
 
     def on_shortcuts_saved(payload: dict):
         for key, value in payload.items():
