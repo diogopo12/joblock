@@ -88,6 +88,7 @@ prompts = {
 
 DEFAULT_SHORTCUTS = {
     "screenshot": "F9",
+    "screenshot_region": "F2",
     "audio_toggle": "F8",
     "focus_input": "F7",
     "send_input": "F6",
@@ -101,6 +102,7 @@ DEFAULT_SHORTCUTS = {
 
 SHORTCUT_LABELS = {
     "screenshot": "Screenshot (analisar imagem)",
+    "screenshot_region": "Screenshot (selecionar área)",
     "audio_toggle": "Gravar/Parar áudio (enviar para LLM)",
     "focus_input": "Focar na caixa de pergunta",
     "send_input": "Enviar a pergunta digitada",
@@ -226,6 +228,14 @@ def capture_screen() -> bytes:
         return mss.tools.to_png(img.rgb, img.size)
 
 
+def capture_screen_region(region: dict) -> bytes:
+    with mss.mss() as sct:
+        if not sct.monitors:
+            raise RuntimeError("Nenhum monitor disponível para captura.")
+        img = sct.grab(region)
+        return mss.tools.to_png(img.rgb, img.size)
+
+
 # =========================
 # OpenAI helpers
 # =========================
@@ -280,6 +290,7 @@ def shortcuts_text() -> str:
         "JOBLOCK — ATALHOS\n"
         "----------------\n"
         f"{format_line(shortcuts['screenshot'], SHORTCUT_LABELS['screenshot'])}"
+        f"{format_line(shortcuts['screenshot_region'], SHORTCUT_LABELS['screenshot_region'])}"
         f"{format_line(shortcuts['audio_toggle'], SHORTCUT_LABELS['audio_toggle'])}"
         f"{format_line(shortcuts['focus_input'], SHORTCUT_LABELS['focus_input'])}"
         f"{format_line(shortcuts['send_input'], SHORTCUT_LABELS['send_input'])}"
@@ -500,7 +511,7 @@ class PromptOverlay(QtWidgets.QWidget):
         self.au = QtWidgets.QTextEdit()
         self.sy = QtWidgets.QTextEdit()
 
-        lbl1 = QtWidgets.QLabel("Prompt Screenshot (F9):")
+        lbl1 = QtWidgets.QLabel("Prompt Screenshot (F9/F2):")
         lbl2 = QtWidgets.QLabel("Prompt Áudio (F8):")
         lbl3 = QtWidgets.QLabel("System Prompt (histórico/memória):")
 
@@ -808,6 +819,87 @@ class ShortcutOverlay(QtWidgets.QWidget):
 
 
 # =========================
+# UI: RegionSelector (seleção de área)
+# =========================
+class RegionSelector(QtWidgets.QWidget):
+    region_selected = QtCore.Signal(QtCore.QRect)
+    canceled = QtCore.Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(
+            QtCore.Qt.FramelessWindowHint |
+            QtCore.Qt.WindowStaysOnTopHint |
+            QtCore.Qt.Tool
+        )
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+        self.setCursor(QtCore.Qt.CrossCursor)
+        self._origin = None
+        self._current = None
+        self._screen_rect = QtCore.QRect()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        screen = QtGui.QGuiApplication.primaryScreen()
+        if screen:
+            self._screen_rect = screen.virtualGeometry()
+            self.setGeometry(self._screen_rect)
+        exclude_from_capture(int(self.winId()))
+
+    def _selection_rect(self) -> QtCore.QRect:
+        if self._origin is None or self._current is None:
+            return QtCore.QRect()
+        return QtCore.QRect(self._origin, self._current).normalized()
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent):
+        if event.button() == QtCore.Qt.LeftButton:
+            self._origin = event.position().toPoint()
+            self._current = self._origin
+            self.update()
+
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent):
+        if self._origin is None:
+            return
+        self._current = event.position().toPoint()
+        self.update()
+
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent):
+        if event.button() != QtCore.Qt.LeftButton or self._origin is None:
+            return
+        self._current = event.position().toPoint()
+        rect = self._selection_rect()
+        self._origin = None
+        self._current = None
+        self.hide()
+        if rect.width() < 5 or rect.height() < 5:
+            self.canceled.emit()
+            return
+        global_rect = rect.translated(self._screen_rect.topLeft())
+        self.region_selected.emit(global_rect)
+
+    def keyPressEvent(self, event: QtGui.QKeyEvent):
+        if event.key() == QtCore.Qt.Key_Escape:
+            self._origin = None
+            self._current = None
+            self.hide()
+            self.canceled.emit()
+            return
+        super().keyPressEvent(event)
+
+    def paintEvent(self, event: QtGui.QPaintEvent):
+        painter = QtGui.QPainter(self)
+        painter.fillRect(self.rect(), QtGui.QColor(0, 0, 0, 120))
+        rect = self._selection_rect()
+        if rect.isValid():
+            painter.setCompositionMode(QtGui.QPainter.CompositionMode_Clear)
+            painter.fillRect(rect, QtCore.Qt.transparent)
+            painter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)
+            pen = QtGui.QPen(QtGui.QColor(255, 255, 255, 220), 2)
+            painter.setPen(pen)
+            painter.drawRect(rect)
+
+
+# =========================
 # Audio Recorder
 # =========================
 class AudioRecorder:
@@ -906,15 +998,19 @@ class ScreenshotWorker(QtCore.QObject):
     status = QtCore.Signal(str)
     result = QtCore.Signal(str)
 
-    def __init__(self, prompt: str):
+    def __init__(self, prompt: str, region: dict | None = None):
         super().__init__()
         self.prompt = prompt
+        self.region = region
 
     @QtCore.Slot()
     def run(self):
         try:
             self.status.emit("Capturando tela...")
-            png = capture_screen()
+            if self.region:
+                png = capture_screen_region(self.region)
+            else:
+                png = capture_screen()
 
             self.status.emit("Consultando LLM (imagem)...")
             answer = ask_llm(self.prompt, png, VISION_MODEL)
@@ -976,6 +1072,7 @@ class TextAskWorker(QtCore.QObject):
 # =========================
 class HotkeyBridge(QtCore.QObject):
     screenshot = QtCore.Signal()
+    screenshot_region = QtCore.Signal()
     audio_toggle = QtCore.Signal()
     hide = QtCore.Signal()
     quit = QtCore.Signal()
@@ -1064,6 +1161,7 @@ def main():
     prompt_overlay = PromptOverlay()
     settings_overlay = SettingsOverlay()
     shortcut_overlay = ShortcutOverlay()
+    region_selector = RegionSelector()
     bridge = HotkeyBridge()
 
     # Mostra HELP ao iniciar (overlay invisível à captura)
@@ -1139,6 +1237,29 @@ def main():
         if not run_worker(worker, "shot_thread", "shot_worker"):
             overlay.set_text("Já estou processando um screenshot... (aguarde)")
 
+    @QtCore.Slot()
+    def do_screenshot_region():
+        hide_all_overlays()
+        region_selector.show()
+        region_selector.raise_()
+        region_selector.activateWindow()
+
+    @QtCore.Slot(QtCore.QRect)
+    def on_region_selected(rect: QtCore.QRect):
+        overlay.move_to_bottom_right()
+        overlay.set_text("Iniciando (screenshot seleção)...")
+        overlay.show()
+        overlay.raise_()
+        region = {
+            "left": rect.x(),
+            "top": rect.y(),
+            "width": rect.width(),
+            "height": rect.height(),
+        }
+        worker = ScreenshotWorker(prompts["screenshot"], region=region)
+        if not run_worker(worker, "shot_thread", "shot_worker"):
+            overlay.set_text("Já estou processando um screenshot... (aguarde)")
+
     def schedule_audio_limit_check():
         if recorder is None or not recorder.recording:
             return
@@ -1208,6 +1329,7 @@ def main():
         prompt_overlay.hide()
         settings_overlay.hide()
         shortcut_overlay.hide()
+        region_selector.hide()
 
     @QtCore.Slot()
     def quit_app():
@@ -1216,6 +1338,7 @@ def main():
         prompt_overlay.hide()
         settings_overlay.hide()
         shortcut_overlay.hide()
+        region_selector.hide()
         if recorder is not None:
             try:
                 recorder.close()
@@ -1324,6 +1447,9 @@ def main():
             keyboard.add_hotkey(shortcuts["screenshot"], lambda: bridge.screenshot.emit())
         )
         hotkey_handles.append(
+            keyboard.add_hotkey(shortcuts["screenshot_region"], lambda: bridge.screenshot_region.emit())
+        )
+        hotkey_handles.append(
             keyboard.add_hotkey(shortcuts["audio_toggle"], lambda: bridge.audio_toggle.emit())
         )
         hotkey_handles.append(
@@ -1367,9 +1493,11 @@ def main():
 
     # Overlay enter -> pergunta manual
     overlay.ask.connect(do_text_question)
+    region_selector.region_selected.connect(on_region_selected)
 
     # Bridge wiring
     bridge.screenshot.connect(do_screenshot)
+    bridge.screenshot_region.connect(do_screenshot_region)
     bridge.audio_toggle.connect(do_audio_toggle)
     bridge.hide.connect(hide_all_overlays)
     bridge.quit.connect(quit_app)
