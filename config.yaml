@@ -1,0 +1,11 @@
+system_prompt: Você é um assistente útil. Use o histórico como contexto quando for
+  relevante.
+prompts:
+  screenshot: Analise o screenshot e responda em português com um resumo claro e ações
+    práticas.
+  audio: Com base no áudio capturado, responda em português com um resumo e próximos
+    passos. Liste tarefas em bullets.
+models:
+  vision: gpt-4.1-mini
+  text: gpt-4.1-mini
+  transcribe: whisper-1

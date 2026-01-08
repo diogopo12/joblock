@@ -68,7 +68,7 @@ MAX_AUDIO_BYTES = 23 * 1024 * 1024  # margem abaixo de 25MB
 MAX_AUDIO_SECONDS_HARD = 15 * 60
 
 TRANSCRIBE_MODEL = "whisper-1"
-TEXT_MODEL = "gpt-4o-mini"
+TEXT_MODEL = "gpt-4.1-mini"
 VISION_MODEL = "gpt-4.1-mini"
 
 AUDIO_RATE = 16000
