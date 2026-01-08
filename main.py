@@ -20,6 +20,7 @@ import io
 import wave
 import threading
 import ctypes
+from pathlib import Path
 from ctypes import wintypes
 from collections import deque
 
@@ -27,6 +28,7 @@ import keyboard
 import mss
 import mss.tools
 import pyaudio
+import yaml
 
 from PySide6 import QtWidgets, QtCore, QtGui
 
@@ -83,6 +85,59 @@ prompts = {
     "screenshot": "Analise o screenshot e responda em português com um resumo claro e ações práticas.",
     "audio": "Com base no áudio capturado, responda em português com um resumo e próximos passos. Liste tarefas em bullets.",
 }
+
+CONFIG_PATH = Path.home() / ".joblock" / "config.yaml"
+
+
+def _default_config() -> dict:
+    return {
+        "system_prompt": SYSTEM_PROMPT_TEXT,
+        "prompts": {
+            "screenshot": prompts["screenshot"],
+            "audio": prompts["audio"],
+        },
+        "models": {
+            "vision": VISION_MODEL,
+            "text": TEXT_MODEL,
+            "transcribe": TRANSCRIBE_MODEL,
+        },
+    }
+
+
+def load_config() -> dict:
+    if not CONFIG_PATH.exists():
+        return _default_config()
+    try:
+        data = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return _default_config()
+    base = _default_config()
+    if isinstance(data, dict):
+        base["system_prompt"] = data.get("system_prompt", base["system_prompt"])
+        prompts_data = data.get("prompts", {})
+        if isinstance(prompts_data, dict):
+            base["prompts"]["screenshot"] = prompts_data.get("screenshot", base["prompts"]["screenshot"])
+            base["prompts"]["audio"] = prompts_data.get("audio", base["prompts"]["audio"])
+        models_data = data.get("models", {})
+        if isinstance(models_data, dict):
+            base["models"]["vision"] = models_data.get("vision", base["models"]["vision"])
+            base["models"]["text"] = models_data.get("text", base["models"]["text"])
+            base["models"]["transcribe"] = models_data.get("transcribe", base["models"]["transcribe"])
+    return base
+
+
+def save_config(config: dict) -> None:
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    yaml.safe_dump(config, CONFIG_PATH.open("w", encoding="utf-8"), sort_keys=False, allow_unicode=True)
+
+
+config = load_config()
+SYSTEM_PROMPT_TEXT = config["system_prompt"]
+prompts["screenshot"] = config["prompts"]["screenshot"]
+prompts["audio"] = config["prompts"]["audio"]
+VISION_MODEL = config["models"]["vision"]
+TEXT_MODEL = config["models"]["text"]
+TRANSCRIBE_MODEL = config["models"]["transcribe"]
 
 # =========================
 # Windows: exclude from capture
@@ -999,6 +1054,21 @@ def main():
         if sp:
             globals()["SYSTEM_PROMPT_TEXT"] = sp
 
+        save_config(
+            {
+                "system_prompt": SYSTEM_PROMPT_TEXT,
+                "prompts": {
+                    "screenshot": prompts["screenshot"],
+                    "audio": prompts["audio"],
+                },
+                "models": {
+                    "vision": VISION_MODEL,
+                    "text": TEXT_MODEL,
+                    "transcribe": TRANSCRIBE_MODEL,
+                },
+            }
+        )
+
         overlay.move_to_bottom_right()
         overlay.set_text("✅ Prompts atualizados (Screenshot/Áudio/System).")
         overlay.show()
@@ -1017,6 +1087,21 @@ def main():
             TEXT_MODEL = text
         if transcribe:
             TRANSCRIBE_MODEL = transcribe
+
+        save_config(
+            {
+                "system_prompt": SYSTEM_PROMPT_TEXT,
+                "prompts": {
+                    "screenshot": prompts["screenshot"],
+                    "audio": prompts["audio"],
+                },
+                "models": {
+                    "vision": VISION_MODEL,
+                    "text": TEXT_MODEL,
+                    "transcribe": TRANSCRIBE_MODEL,
+                },
+            }
+        )
 
         overlay.move_to_bottom_right()
         overlay.set_text("✅ Modelos atualizados (Screenshot/Texto/Áudio).")
