@@ -40,15 +40,19 @@ client = OpenAI()
 # =========================
 MEMORY_MAX_TURNS = 20
 memory = deque(maxlen=MEMORY_MAX_TURNS)
+memory_lock = threading.Lock()
 
 
 def memory_add(user_text: str, assistant_text: str):
-    memory.append({"q": user_text, "a": assistant_text})
+    with memory_lock:
+        memory.append({"q": user_text, "a": assistant_text})
 
 
 def build_messages_with_memory(system_prompt: str, user_text: str):
     messages = [{"role": "system", "content": system_prompt}]
-    for item in memory:
+    with memory_lock:
+        items = list(memory)
+    for item in items:
         messages.append({"role": "user", "content": item["q"]})
         messages.append({"role": "assistant", "content": item["a"]})
     messages.append({"role": "user", "content": user_text})
@@ -82,17 +86,20 @@ prompts = {
 # =========================
 # Windows: exclude from capture
 # =========================
-user32 = ctypes.WinDLL("user32", use_last_error=True)
-WDA_EXCLUDEFROMCAPTURE = 0x11
-user32.SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
-user32.SetWindowDisplayAffinity.restype = wintypes.BOOL
+if sys.platform == "win32":
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    WDA_EXCLUDEFROMCAPTURE = 0x11
+    user32.SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
+    user32.SetWindowDisplayAffinity.restype = wintypes.BOOL
 
-
-def exclude_from_capture(hwnd: int):
-    try:
-        user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
-    except Exception:
-        pass
+    def exclude_from_capture(hwnd: int):
+        try:
+            user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
+        except Exception:
+            pass
+else:
+    def exclude_from_capture(hwnd: int):
+        return
 
 
 # =========================
@@ -100,7 +107,9 @@ def exclude_from_capture(hwnd: int):
 # =========================
 def capture_screen() -> bytes:
     with mss.mss() as sct:
-        monitor = sct.monitors[1]
+        if not sct.monitors:
+            raise RuntimeError("Nenhum monitor disponível para captura.")
+        monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
         img = sct.grab(monitor)
         return mss.tools.to_png(img.rgb, img.size)
 
@@ -490,6 +499,13 @@ class AudioRecorder:
 
         return buf.getvalue()
 
+    def close(self):
+        if self._recording:
+            self.stop_and_get_wav_bytes()
+        if self._pa is not None:
+            self._pa.terminate()
+            self._pa = None
+
 
 # =========================
 # Workers
@@ -679,6 +695,8 @@ def main():
             channels=AUDIO_CHANNELS,
             sample_width=SAMPLE_WIDTH_BYTES,
         )
+    pa.terminate()
+    pa = None
 
     def clear_thread(thread_key: str, worker_key: str):
         state[thread_key] = None
@@ -772,7 +790,8 @@ def main():
 
     @QtCore.Slot()
     def clear_memory_slot():
-        memory.clear()
+        with memory_lock:
+            memory.clear()
         overlay.move_to_bottom_right()
         overlay.set_text("🧹 Memória limpa (histórico zerado).")
         overlay.show()
@@ -789,6 +808,11 @@ def main():
         overlay.hide()
         help_overlay.hide()
         prompt_overlay.hide()
+        if recorder is not None:
+            try:
+                recorder.close()
+            except Exception:
+                pass
         try:
             keyboard.clear_all_hotkeys()
         except Exception:
