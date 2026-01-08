@@ -11,6 +11,7 @@ models:
   transcribe: whisper-1
 shortcuts:
   screenshot: F9
+  screenshot_region: F2
   audio_toggle: F8
   focus_input: F7
   send_input: F6

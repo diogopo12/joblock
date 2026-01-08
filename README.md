@@ -20,6 +20,7 @@ ou compartilhamentos de vídeo.
 | Tecla | Ação |
 |-----|-----|
 | F9 | Analisar screenshot |
+| F2 | Analisar screenshot (selecionar área) |
 | F8 | Gravar / parar áudio |
 | F7 | Focar caixa de pergunta |
 | F6 | Enviar pergunta |
@@ -71,5 +72,4 @@ python main.py
 
 ```bash
 pythonw main.py
-
 
