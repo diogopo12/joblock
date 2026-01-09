@@ -1382,6 +1382,7 @@ def main():
         settings_overlay.activateWindow()
 
     def show_shortcut_overlay():
+        help_overlay.hide()
         shortcut_overlay.set_shortcuts(shortcuts)
         shortcut_overlay.move_center()
         shortcut_overlay.show()
